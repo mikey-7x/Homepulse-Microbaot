@@ -173,18 +173,6 @@ void handleStatus() {
 **Project Creator:** *Mikey-7x / Yogesh R. Chauhan*  
 **GitHub:** [github.com/mikey-7x](https://github.com/mikey-7x)  
 **License:** [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)  
-**Date:** 29 August 2026
-
----
-## 📜 License
-This project is open-source and available under the [MIT License](LICENSE).
-
----
-
-## **📜 Credits**  
-Developed with  ❤️ by **[mikey-7x](https://github.com/mikey-7x)** 🚀🔥  
-
-
-[other repository](https://github.com/mikey-7x?tab=repositories)
+**Date:** 1 September 2026
 
 Special thanks to the open-source community for providing awesome libraries!
