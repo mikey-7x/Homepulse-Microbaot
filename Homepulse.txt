@@ -1,0 +1,536 @@
+﻿
+⭐1. Wemos D1 Mini Firmware (3 Fans, 6 Relays)
+The logic remains rock-solid. Ensure your Wemos is wired correctly: Fans (D1, D5, D2) and Relays (D0, D3, D4, D6, D7, D8).
+#include <ESP8266WiFi.h>
+#include <ESP8266WebServer.h>
+
+const char* ssid = "Wemos_Home_Auto";
+const char* password = "87651234"; 
+
+ESP8266WebServer server(80);
+
+// Pins & States for 3 Fans
+const int fanPins[3] = {D1, D5, D2}; 
+int fanSpeeds[3] = {0, 0, 0}; 
+bool fanStates[3] = {false, false, false}; 
+
+// Pins & States for 6 Relays
+const int relayPins[6] = {D0, D3, D4, D6, D7, D8};
+bool relayStates[6] = {false, false, false, false, false, false}; 
+
+void setup() {
+  Serial.begin(115200);
+
+  for (int i = 0; i < 3; i++) {
+    pinMode(fanPins[i], OUTPUT);
+    analogWrite(fanPins[i], 1023); // 1023 = Active-LOW OFF
+  }
+
+  for (int i = 0; i < 6; i++) {
+    pinMode(relayPins[i], OUTPUT);
+    digitalWrite(relayPins[i], HIGH); // HIGH = Active-LOW OFF
+  }
+
+  WiFi.softAP(ssid, password);
+  Serial.print("Hotspot Started. AP IP: ");
+  Serial.println(WiFi.softAPIP());
+
+  server.on("/relay", HTTP_GET, handleRelay);
+  server.on("/fan_state", HTTP_GET, handleFanState);
+  server.on("/fan_speed", HTTP_GET, handleFanSpeed);
+  server.on("/status", HTTP_GET, handleStatus);
+  server.begin();
+}
+
+void loop() {
+  server.handleClient();
+}
+
+void updateFanHardware(int id) {
+  if (!fanStates[id]) {
+    analogWrite(fanPins[id], 1023); 
+  } else {
+    int pwmValue = map(fanSpeeds[id], 0, 100, 1023, 0); 
+    analogWrite(fanPins[id], pwmValue);
+  }
+}
+
+void handleRelay() {
+  if (server.hasArg("id") && server.hasArg("state")) {
+    int id = server.arg("id").toInt(); 
+    String state = server.arg("state");
+
+    if (id >= 0 && id < 6) {
+      if (state == "on") {
+        digitalWrite(relayPins[id], LOW); 
+        relayStates[id] = true;
+      } else {
+        digitalWrite(relayPins[id], HIGH); 
+        relayStates[id] = false;
+      }
+      server.send(200, "text/plain", "OK");
+      return;
+    }
+  }
+  server.send(400, "text/plain", "Bad Request");
+}
+
+void handleFanState() {
+  if (server.hasArg("id") && server.hasArg("state")) {
+    int id = server.arg("id").toInt(); 
+    String state = server.arg("state");
+
+    if (id >= 0 && id < 3) {
+      fanStates[id] = (state == "on");
+      updateFanHardware(id);
+      server.send(200, "text/plain", "OK");
+      return;
+    }
+  }
+  server.send(400, "text/plain", "Bad Request");
+}
+
+void handleFanSpeed() {
+  if (server.hasArg("id") && server.hasArg("speed")) {
+    int id = server.arg("id").toInt(); 
+    int speed = server.arg("speed").toInt(); 
+
+    if (id >= 0 && id < 3 && speed >= 0 && speed <= 100) {
+      fanSpeeds[id] = speed;
+      updateFanHardware(id);
+      server.send(200, "text/plain", "OK");
+      return;
+    }
+  }
+  server.send(400, "text/plain", "Bad Request");
+}
+
+void handleStatus() {
+  String json = "{";
+  json += "\"r\":[";
+  for(int i = 0; i < 6; i++) {
+    json += (relayStates[i] ? "true" : "false");
+    if(i < 5) json += ",";
+  }
+  json += "],\"fs\":[";
+  for(int i = 0; i < 3; i++) {
+    json += (fanStates[i] ? "true" : "false");
+    if(i < 2) json += ",";
+  }
+  json += "],\"f\":[";
+  json += fanSpeeds[0]; json += ","; json += fanSpeeds[1]; json += ","; json += fanSpeeds[2];
+  json += "]}";
+  
+  server.send(200, "application/json", json);
+}
+
+
+⭐2.android app code using watari pro v3.1 :
+#!/bin/bash
+set -e
+
+echo "[*] Initializing Homepulse Visual Edition..."
+cd ~
+rm -rf Homepulse
+~/.watari_forge/bin/watari-init Homepulse
+cd Homepulse
+
+# 1. Inject Android Manifest
+cat << 'EOF' > app/src/main/AndroidManifest.xml
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <application android:allowBackup="true" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:label="Homepulse" android:supportsRtl="true" android:usesCleartextTraffic="true" android:theme="@style/Theme.AppCompat.Light.NoActionBar">
+        <activity android:name=".MainActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
+EOF
+
+# 2. Inject Branding & Assets
+mkdir -p app/src/main/res/mipmap-xxhdpi
+mkdir -p app/src/main/res/drawable
+
+if [ -f "/storage/emulated/0/Download/h1.png" ]; then
+    cp "/storage/emulated/0/Download/h1.png" app/src/main/res/mipmap-xxhdpi/ic_launcher.png
+    cp "/storage/emulated/0/Download/h1.png" app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png
+fi
+
+BG_PATH="/storage/emulated/0/ホタル/Opera /d29cf5e0-770b-4597-8f19-46ad35031164.jpeg"
+if [ -f "$BG_PATH" ]; then
+    cp "$BG_PATH" app/src/main/res/drawable/app_bg.jpeg
+else
+    echo "/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=" | base64 -d > app/src/main/res/drawable/app_bg.jpeg
+fi
+
+# 3. Create Vector Drawables for Physical Visuals
+cat << 'EOF' > app/src/main/res/drawable/ic_fan.xml
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="48dp" android:height="48dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#FFFFFF" android:pathData="M12,12m-2,0a2,2 0,1 1,4 0a2,2 0,1 1,-4 0"/>
+    <path android:fillColor="#FFFFFF" android:pathData="M12,10.5C9.5,7.5 7.5,3 12,3c4.5,0 2.5,4.5 0,7.5"/>
+    <path android:fillColor="#FFFFFF" android:pathData="M10.5,12C7.5,14.5 3,16.5 3,12c0,-4.5 4.5,-2.5 7.5,0"/>
+    <path android:fillColor="#FFFFFF" android:pathData="M13.5,12C16.5,9.5 21,7.5 21,12c0,4.5 -4.5,2.5 -7.5,0"/>
+    <path android:fillColor="#FFFFFF" android:pathData="M12,13.5C14.5,16.5 16.5,21 12,21c-4.5,0 -2.5,-4.5 0,-7.5"/>
+</vector>
+EOF
+
+cat << 'EOF' > app/src/main/res/drawable/ic_bulb.xml
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="48dp" android:height="48dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#FFFFFF" android:pathData="M9 21c0 .55.45 1 1 1h4c.55 0 1-.45 1-1v-1H9v1zm3-19C8.14 2 5 5.14 5 9c0 2.38 1.19 4.47 3 5.74V17c0 .55.45 1 1 1h6c.55 0 1-.45 1-1v-2.26c1.81-1.27 3-3.36 3-5.74 0-3.86-3.14-7-7-7z"/>
+</vector>
+EOF
+
+cat << 'EOF' > app/src/main/res/drawable/ic_tube.xml
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="48dp" android:height="48dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#FFFFFF" android:pathData="M4 10h16v4H4zM2 10h1v4H2zM21 10h1v4h-1z"/>
+</vector>
+EOF
+
+cat << 'EOF' > app/src/main/res/drawable/ic_socket.xml
+<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="48dp" android:height="48dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#FFFFFF" android:pathData="M19,3H5C3.89,3 3,3.9 3,5v14c0,1.1 0.89,2 2,2h14c1.1,0 2,-0.9 2,-2V5C21,3.9 20.1,3 19,3zM12,6.5c1.1,0 2,0.9 2,2s-0.9,2 -2,2s-2,-0.9 -2,-2S10.9,6.5 12,6.5zM8,16c-1.1,0 -2,-0.9 -2,-2s0.9,-2 2,-2s2,0.9 2,2S9.1,16 8,16zM16,16c-1.1,0 -2,-0.9 -2,-2s0.9,-2 2,-2s2,0.9 2,2S17.1,16 16,16z"/>
+</vector>
+EOF
+
+# 4. Create Bottom Navigation Menu Safely
+mkdir -p app/src/main/res/menu
+cat << 'EOF' > app/src/main/res/menu/bottom_nav.xml
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:id="@+id/nav_home" android:title="Control" />
+    <item android:id="@+id/nav_settings" android:title="Settings" />
+</menu>
+EOF
+
+# 5. Inject Advanced XML Layout (Cards with ImageViews)
+cat << 'EOF' > app/src/main/res/layout/activity_main.xml
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent" android:layout_height="match_parent" android:background="@drawable/app_bg">
+
+    <ViewFlipper android:id="@+id/viewFlipper" android:layout_width="match_parent" android:layout_height="match_parent" android:layout_above="@+id/bottomNav">
+
+        <!-- DASHBOARD VIEW -->
+        <ScrollView android:layout_width="match_parent" android:layout_height="match_parent" android:padding="16dp">
+            <LinearLayout android:id="@+id/hardwareContainer" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical">
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Homepulse Microbaot" android:textColor="#00E676" android:textSize="26sp" android:textStyle="bold" android:gravity="center" android:layout_marginBottom="24dp" android:layout_marginTop="16dp"/>
+            </LinearLayout>
+        </ScrollView>
+
+        <!-- SETTINGS VIEW -->
+        <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:padding="24dp" android:gravity="center">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Network Settings" android:textColor="#FFFFFF" android:textSize="22sp" android:layout_marginBottom="16dp" />
+            <EditText android:id="@+id/inputPassword" android:layout_width="match_parent" android:layout_height="60dp" android:hint="Enter Admin Password" android:inputType="textPassword" android:textColor="#FFFFFF" android:textColorHint="#888888" android:background="#DD222222" android:padding="12dp" android:layout_marginBottom="16dp" />
+            <Button android:id="@+id/btnUnlock" android:layout_width="match_parent" android:layout_height="60dp" android:text="Unlock Settings" />
+            <LinearLayout android:id="@+id/hiddenIpLayout" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone" android:layout_marginTop="24dp">
+                <EditText android:id="@+id/inputIp" android:layout_width="match_parent" android:layout_height="60dp" android:hint="Wemos IP (e.g. 192.168.4.1)" android:textColor="#FFFFFF" android:textColorHint="#888888" android:background="#DD222222" android:padding="12dp" android:layout_marginBottom="16dp" />
+                <Button android:id="@+id/btnSaveSettings" android:layout_width="match_parent" android:layout_height="60dp" android:text="Save IP Address" />
+            </LinearLayout>
+        </LinearLayout>
+    </ViewFlipper>
+
+    <com.google.android.material.bottomnavigation.BottomNavigationView android:id="@+id/bottomNav" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_alignParentBottom="true" android:background="#F2121212" app:itemTextColor="#FFFFFF" app:itemIconTint="#00E676" app:menu="@menu/bottom_nav" />
+</RelativeLayout>
+EOF
+
+# 6. Inject Dynamic UI & Animator Kotlin Logic
+cat << 'EOF' > app/src/main/java/com/watari/homepulse/MainActivity.kt
+package com.watari.homepulse
+
+import android.animation.ObjectAnimator
+import android.content.Context
+import android.content.SharedPreferences
+import android.graphics.Color
+import android.os.Bundle
+import android.view.Gravity
+import android.view.View
+import android.view.animation.LinearInterpolator
+import android.widget.*
+import androidx.appcompat.app.AppCompatActivity
+import com.google.android.material.bottomnavigation.BottomNavigationView
+import org.json.JSONObject
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.net.HttpURLConnection
+import java.net.URL
+import java.util.concurrent.Executors
+
+class MainActivity : AppCompatActivity() {
+
+    private val executor = Executors.newSingleThreadExecutor()
+    private lateinit var prefs: SharedPreferences
+    private var currentIp = "192.168.4.1"
+
+    private val relayStates = BooleanArray(6) { false }
+    private val fanStates = BooleanArray(3) { false }
+    private val fanSpeeds = IntArray(3) { 0 }
+
+    private val relaySwitches = ArrayList<Switch>()
+    private val relayImages = ArrayList<ImageView>()
+    private val fanSwitches = ArrayList<Switch>()
+    private val fanImages = ArrayList<ImageView>()
+    private val fanSeekBars = ArrayList<SeekBar>()
+    private val fanAnimators = ArrayList<ObjectAnimator>()
+
+    private val relayNames = arrayOf("Socket 1 (D0)", "Tubelight 1 (D3)", "Socket 2 (D4)", "Bulb 1 (D6)", "Tubelight 2 (D7)", "Socket 3 (D8)")
+    private val relayIcons = arrayOf(R.drawable.ic_socket, R.drawable.ic_tube, R.drawable.ic_socket, R.drawable.ic_bulb, R.drawable.ic_tube, R.drawable.ic_socket)
+    private val fanNames = arrayOf("Fan 1 (D1)", "Fan 2 (D5)", "Fan 3 (D2)")
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_main)
+
+        prefs = getSharedPreferences("HomepulsePrefs", Context.MODE_PRIVATE)
+        currentIp = prefs.getString("WEMOS_IP", "192.168.4.1") ?: "192.168.4.1"
+
+        setupNavigationAndSettings()
+        generateDashboardUI()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        fetchHardwareStatus()
+    }
+
+    private fun generateDashboardUI() {
+        val container = findViewById<LinearLayout>(R.id.hardwareContainer)
+        val cardBg = Color.parseColor("#D9121212")
+
+        for (i in 0 until 3) {
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setBackgroundColor(cardBg)
+                setPadding(30, 30, 30, 30)
+                gravity = Gravity.CENTER_VERTICAL
+                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { setMargins(0,0,0,24) }
+            }
+
+            val img = ImageView(this).apply {
+                setImageResource(R.drawable.ic_fan)
+                setColorFilter(Color.parseColor("#555555"))
+                layoutParams = LinearLayout.LayoutParams(160, 160)
+            }
+            fanImages.add(img)
+
+            val anim = ObjectAnimator.ofFloat(img, "rotation", 0f, 360f).apply {
+                repeatCount = ObjectAnimator.INFINITE
+                interpolator = LinearInterpolator()
+            }
+            fanAnimators.add(anim)
+
+            val controlBox = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(30, 0, 0, 0)
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            }
+
+            val sw = Switch(this).apply {
+                text = fanNames[i]
+                setTextColor(Color.WHITE)
+                textSize = 18f
+                setOnClickListener { toggleFanState(i) }
+            }
+            fanSwitches.add(sw)
+
+            val seek = SeekBar(this).apply {
+                max = 100
+                isEnabled = false
+                setPadding(0, 20, 0, 0)
+                setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                        if (fromUser && fanStates[i]) setFanSpeed(i, progress)
+                    }
+                    override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+                    override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+                })
+            }
+            fanSeekBars.add(seek)
+
+            controlBox.addView(sw)
+            controlBox.addView(seek)
+            card.addView(img)
+            card.addView(controlBox)
+            container.addView(card)
+        }
+
+        for (i in 0 until 6) {
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setBackgroundColor(cardBg)
+                setPadding(30, 30, 30, 30)
+                gravity = Gravity.CENTER_VERTICAL
+                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { setMargins(0,0,0,24) }
+            }
+
+            val img = ImageView(this).apply {
+                setImageResource(relayIcons[i])
+                setColorFilter(Color.parseColor("#555555"))
+                layoutParams = LinearLayout.LayoutParams(160, 160)
+            }
+            relayImages.add(img)
+
+            val sw = Switch(this).apply {
+                text = relayNames[i]
+                setTextColor(Color.WHITE)
+                textSize = 18f
+                setPadding(30, 0, 0, 0)
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                setOnClickListener { toggleRelay(i) }
+            }
+            relaySwitches.add(sw)
+
+            card.addView(img)
+            card.addView(sw)
+            container.addView(card)
+        }
+    }
+
+    private fun updateVisuals() {
+        for (i in 0 until 6) {
+            relaySwitches[i].isChecked = relayStates[i]
+            if (relayStates[i]) {
+                val tint = if (relayNames[i].contains("Socket")) "#00E676" else "#FFEB3B"
+                relayImages[i].setColorFilter(Color.parseColor(tint))
+            } else {
+                relayImages[i].setColorFilter(Color.parseColor("#555555"))
+            }
+        }
+
+        for (i in 0 until 3) {
+            fanSwitches[i].isChecked = fanStates[i]
+            fanSeekBars[i].isEnabled = fanStates[i]
+            fanSeekBars[i].progress = fanSpeeds[i]
+            
+            if (fanStates[i]) {
+                fanImages[i].setColorFilter(Color.parseColor("#00E676"))
+                if (fanSpeeds[i] > 0) {
+                    val duration = ((100 - fanSpeeds[i]) * 15) + 300
+                    fanAnimators[i].duration = duration.toLong()
+                    if (!fanAnimators[i].isRunning) fanAnimators[i].start()
+                } else {
+                    fanAnimators[i].cancel()
+                }
+            } else {
+                fanImages[i].setColorFilter(Color.parseColor("#555555"))
+                fanAnimators[i].cancel()
+            }
+        }
+    }
+
+    private fun fetchHardwareStatus() {
+        executor.execute {
+            try {
+                val url = URL("http://$currentIp/status")
+                val conn = url.openConnection() as HttpURLConnection
+                conn.requestMethod = "GET"
+                conn.connectTimeout = 2000
+
+                val reader = BufferedReader(InputStreamReader(conn.inputStream))
+                val response = reader.readText()
+                reader.close()
+                conn.disconnect()
+
+                val json = JSONObject(response)
+                val rArray = json.getJSONArray("r")
+                val fsArray = json.getJSONArray("fs")
+                val fArray = json.getJSONArray("f")
+
+                runOnUiThread {
+                    for (i in 0 until 6) relayStates[i] = rArray.getBoolean(i)
+                    for (i in 0 until 3) { 
+                        fanStates[i] = fsArray.getBoolean(i)
+                        fanSpeeds[i] = fArray.getInt(i)
+                    }
+                    updateVisuals()
+                }
+            } catch (e: Exception) {}
+        }
+    }
+
+    private fun toggleRelay(i: Int) {
+        val target = !relayStates[i]
+        executor.execute {
+            try {
+                val conn = URL("http://$currentIp/relay?id=$i&state=${if (target) "on" else "off"}").openConnection() as HttpURLConnection
+                conn.requestMethod = "GET"
+                conn.connectTimeout = 1000
+                if (conn.responseCode == 200) runOnUiThread { relayStates[i] = target; updateVisuals() }
+                conn.disconnect()
+            } catch (e: Exception) {}
+        }
+    }
+
+    private fun toggleFanState(i: Int) {
+        val target = !fanStates[i]
+        executor.execute {
+            try {
+                val conn = URL("http://$currentIp/fan_state?id=$i&state=${if (target) "on" else "off"}").openConnection() as HttpURLConnection
+                conn.requestMethod = "GET"
+                conn.connectTimeout = 1000
+                if (conn.responseCode == 200) runOnUiThread { fanStates[i] = target; updateVisuals() }
+                conn.disconnect()
+            } catch (e: Exception) {}
+        }
+    }
+
+    private fun setFanSpeed(i: Int, speed: Int) {
+        fanSpeeds[i] = speed
+        updateVisuals()
+        executor.execute {
+            try {
+                val conn = URL("http://$currentIp/fan_speed?id=$i&speed=$speed").openConnection() as HttpURLConnection
+                conn.requestMethod = "GET"
+                conn.connectTimeout = 500
+                conn.responseCode
+                conn.disconnect()
+            } catch (e: Exception) {}
+        }
+    }
+
+    private fun setupNavigationAndSettings() {
+        val flipper = findViewById<ViewFlipper>(R.id.viewFlipper)
+        findViewById<BottomNavigationView>(R.id.bottomNav).setOnItemSelectedListener { item ->
+            if (item.itemId == R.id.nav_home) flipper.displayedChild = 0 else flipper.displayedChild = 1
+            true
+        }
+        val pass = findViewById<EditText>(R.id.inputPassword)
+        val unlock = findViewById<Button>(R.id.btnUnlock)
+        val hidden = findViewById<LinearLayout>(R.id.hiddenIpLayout)
+        val ip = findViewById<EditText>(R.id.inputIp).apply { setText(currentIp) }
+        
+        unlock.setOnClickListener {
+            if (pass.text.toString() == "1234qwer") {
+                pass.visibility = View.GONE; unlock.visibility = View.GONE; hidden.visibility = View.VISIBLE
+            } else Toast.makeText(this, "Incorrect Password", Toast.LENGTH_SHORT).show()
+        }
+        findViewById<Button>(R.id.btnSaveSettings).setOnClickListener {
+            if (ip.text.toString().isNotEmpty()) {
+                currentIp = ip.text.toString().trim()
+                prefs.edit().putString("WEMOS_IP", currentIp).apply()
+                Toast.makeText(this, "IP Saved", Toast.LENGTH_SHORT).show()
+                fetchHardwareStatus()
+            }
+        }
+    }
+}
+EOF
+
+echo "[*] Compiling Advanced Visual APK..."
+~/.watari_forge/bin/watari-build
+
+if [ -f "build/app-debug.apk" ]; then
+    cp build/app-debug.apk /storage/emulated/0/Download/Homepulse.apk
+    echo "=========================================================="
+    echo " [SUCCESS] Homepulse V2 (Live Visuals) Exported!"
+    echo " Location: /storage/emulated/0/Download/Homepulse.apk"
+    echo "=========================================================="
+fi
+
+
